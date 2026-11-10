@@ -11,6 +11,15 @@ Creates a Fedora usb drive that will boot on Apple M-series systems (that have A
   If needed, you can always install a specific version via pip  
   `python3 -m pip install --user git+https://github.com/systemd/mkosi.git@v26`
 
+## Prebuilt Images & Verification
+
+Ready-to-use bootable compressed raw images (`asahi-fedora-usb.raw.zst`) with Btrfs compression are built via GitHub Actions and published under [Releases](https://github.com/adamaru/asahi-fedora-usb/releases).
+
+Every published image includes a cryptographically signed build provenance attestation (via GitHub Artifact Attestations / Sigstore). You can verify the authenticity and provenance of a downloaded image with:
+```bash
+gh attestation verify asahi-fedora-usb.raw.zst --owner adamaru
+```
+
 
 To build a minimal Fedora image and install it to a usb drive, simply run:
 ```

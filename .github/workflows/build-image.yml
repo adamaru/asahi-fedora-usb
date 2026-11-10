@@ -19,6 +19,8 @@ jobs:
     runs-on: ubuntu-26.04
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -70,6 +72,13 @@ jobs:
             asahi-fedora-usb.raw.zst
             asahi-fedora-usb.raw.zst.sha256
           retention-days: 14
+
+      - name: Generate Build Provenance Attestation
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            asahi-fedora-usb.raw.zst
+            asahi-fedora-usb.raw.zst.sha256
 
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/v')
