@@ -19,11 +19,11 @@ DNS='8.8.8.8'
 if [ "$(whoami)" != 'root' ]; then
 echo "You must be root to run this script"
 echo "Try \`sudo su -\` before running this script"
-exit
+exit 1
 elif [[ -n $SUDO_USER ]] && [[ $SUDO_USER != 'root' ]]; then
 echo "You must run this script as root and not with sudo"
 echo "Try \`sudo su -\` before running this script"
-exit
+exit 1
 fi
 
 [ ! -d $mnt_usb ] && mkdir $mnt_usb
@@ -41,11 +41,11 @@ done
 
 shift "$((OPTIND-1))"
 
-[[ -n $usb_device ]] && [[ ! -b $usb_device ]] && echo $usb_device is not a block device && exit
+[[ -n $usb_device ]] && [[ ! -b $usb_device ]] && echo $usb_device is not a block device && exit 1
 
 check_mkosi() {
     mkosi_cmd=$(command -v mkosi || true)
-    [[ -z $mkosi_cmd ]] && echo 'mkosi is not installed...exiting' && exit
+    [[ -z $mkosi_cmd ]] && echo 'mkosi is not installed...exiting' && exit 1
     mkosi_version=$(mkosi --version | awk '{print $2}' | sed 's/\..*$//')
 
     for ver in ${mkosi_supported_versions[@]}; do
@@ -57,7 +57,7 @@ check_mkosi() {
         echo "mkosi version: $mkosi_version"
         echo -e "\nthis project supports mkosi versions 25-26"
         echo "please install a supported version to continue"
-        exit
+        exit 1
     fi
 }
 
@@ -67,7 +67,7 @@ mount_usb() {
     sleep 1
     # first try to mount the usb partitions via their uuid
     if [ $(blkid | grep -Ei "$EFI_UUID|$BOOT_UUID|$ROOT_UUID" | wc -l) -eq 3 ]; then
-        [[ -z "$(findmnt -n $mnt_usb)" ]] && mount -U $ROOT_UUID $mnt_usb
+        [[ -z "$(findmnt -n $mnt_usb)" ]] && mount -o compress=zstd:1 -U $ROOT_UUID $mnt_usb
         [[ -z "$(findmnt -n $mnt_usb/boot)" ]] && mount -U $BOOT_UUID $mnt_usb/boot
         [[ -z "$(findmnt -n $mnt_usb/boot/efi)" ]] && mount -U $EFI_UUID $mnt_usb/boot/efi
         # we need this since we're using set -e
@@ -80,9 +80,9 @@ mount_usb() {
             exit
         fi
 
-        [[ -z "$(findmnt -n $mnt_usb)" ]] && mount "$usb_device"3 $mnt_usb
-        [[ -z "$(findmnt -n $mnt_usb/boot)" ]] && mount "$usb_device"2 $mnt_usb/boot
-        [[ -z "$(findmnt -n $mnt_usb/boot/efi)" ]] && mount "$usb_device"1 $mnt_usb/boot/efi
+        [[ -z "$(findmnt -n $mnt_usb)" ]] && (mount -o compress=zstd:1 "$usb_device"3 $mnt_usb 2>/dev/null || mount -o compress=zstd:1 "${usb_device}p3" $mnt_usb)
+        [[ -z "$(findmnt -n $mnt_usb/boot)" ]] && (mount "$usb_device"2 $mnt_usb/boot 2>/dev/null || mount "${usb_device}p2" $mnt_usb/boot)
+        [[ -z "$(findmnt -n $mnt_usb/boot/efi)" ]] && (mount "$usb_device"1 $mnt_usb/boot/efi 2>/dev/null || mount "${usb_device}p1" $mnt_usb/boot/efi)
 
     fi
 }
@@ -117,7 +117,7 @@ wipe_usb() {
     umount_usb
 
     if [ $(blkid | grep -Ei "$EFI_UUID|$BOOT_UUID|$ROOT_UUID" | wc -l) -eq 3 ]; then
-        [[ -z "$(findmnt -n $mnt_usb)" ]] && mount -U $ROOT_UUID $mnt_usb
+        [[ -z "$(findmnt -n $mnt_usb)" ]] && mount -o compress=zstd:1 -U $ROOT_UUID $mnt_usb
         if [ -e $mnt_usb/boot ]; then
             [[ -z "$(findmnt -n $mnt_usb/boot)" ]] && mount -U $BOOT_UUID $mnt_usb/boot
         fi
@@ -142,22 +142,22 @@ wipe_usb() {
 prepare_usb_device() {
     umount_usb
     is_mounted=$(lsblk -no MOUNTPOINT $usb_device | sed '/^$/d')
-    [[ -n "$is_mounted" ]] && echo -e "\n### The usb drive is currently mounted here\n\n$(lsblk $usb_device)\n\n### Please unmount the drive and then re-run the script\n" && exit
+    [[ -n "$is_mounted" ]] && echo -e "\n### The usb drive is currently mounted here\n\n$(lsblk $usb_device)\n\n### Please unmount the drive and then re-run the script\n" && exit 1
     echo '### Preparing USB device'
-    # create 5GB root partition
-    #echo -e 'o\ny\nn\n\n\n+600M\nef00\nn\n\n\n+1G\n8300\nn\n\n\n+5G\n8300\nw\ny\n' | gdisk "$usb_device"
-    # root partition will take up all remaining space\
-    echo -e 'o\ny\nn\n\n\n+600M\nef00\nn\n\n\n+1G\n8300\nn\n\n\n\n8300\nw\ny\n' | gdisk $usb_device
+    # root partition will take up all remaining space (fits 4GB+ USB drives)
+    echo -e 'o\ny\nn\n\n\n+100M\nef00\nn\n\n\n+400M\n8300\nn\n\n\n\n8300\nw\ny\n' | gdisk $usb_device
+    partx -u "$usb_device" 2>/dev/null || udevadm settle 2>/dev/null || true
     mkfs.vfat -F 32 -n 'EFI-USB-FED' -i $(echo $EFI_UUID | tr -d '-') "$usb_device"1 || mkfs.vfat -F 32 -n 'EFI-USB-FED' -i $(echo $EFI_UUID | tr -d '-') "$usb_device"p1
     mkfs.ext4 -U $BOOT_UUID -L 'fedora-usb-boot' -F "$usb_device"2 || mkfs.ext4 -U $BOOT_UUID -L 'fedora-usb-boot' -F "$usb_device"p2
-    mkfs.ext4 -U $ROOT_UUID -L 'fedora-usb-root' -F "$usb_device"3 || mkfs.ext4 -U $ROOT_UUID -L 'fedora-usb-root' -F "$usb_device"p3
+    mkfs.btrfs -U $ROOT_UUID -L 'fedora-usb-root' -f "$usb_device"3 || mkfs.btrfs -U $ROOT_UUID -L 'fedora-usb-root' -f "$usb_device"p3
     # reserved for future use: kernel 6.7
     #mkfs.f2fs -U $ROOT_UUID -l 'fedora-usb-root' -f "$usb_device"3 || mkfs.f2fs -U $ROOT_UUID -l 'fedora-usb-root' -f "$usb_device"p3
-    systemctl daemon-reload
+    udevadm settle 2>/dev/null || true
+    systemctl daemon-reload 2>/dev/null || true
 
     if [ $(blkid | grep -Ei "$EFI_UUID|$BOOT_UUID|$ROOT_UUID" | wc -l) -ne 3 ]; then
         echo -e "\nthe partitions and/or filesystem were not created correctly on $usb_device\nexiting\n"
-        exit
+        exit 1
     fi
 }
 
@@ -181,7 +181,7 @@ install_usb() {
     echo '### Cleaning up'
     rm -fr $mkosi_rootfs/var/cache/dnf/*
     echo '### Mounting usb partitions and copying files'
-    mount -U $ROOT_UUID $mnt_usb
+    mount -o compress=zstd:1 -U $ROOT_UUID $mnt_usb
     rsync -aHAX --exclude '/tmp/*' --exclude '/boot/*' --exclude '/efi' $mkosi_rootfs/ $mnt_usb
     mount -U $BOOT_UUID $mnt_usb/boot
     echo "rsync -aHAX --exclude '/efi/*' $mkosi_rootfs/boot/ $mnt_usb/boot"
@@ -266,8 +266,8 @@ elif [[ -n $1 ]]; then
     echo "$1 isn't a recogized option"
 fi
 
-[[ -z $usb_device ]] && echo "usage ./build -d [usb_device] || ./build {mount,umount,chroot}" && exit
-[[ ! -e $usb_device ]] && echo -e "\n$usb_device doesn't exist\n" && exit
+[[ -z $usb_device ]] && echo "usage ./build -d [usb_device] || ./build {mount,umount,chroot}" && exit 1
+[[ ! -e $usb_device ]] && echo -e "\n$usb_device doesn't exist\n" && exit 1
 
 
 check_mkosi
